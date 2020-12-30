@@ -1,0 +1,47 @@
+#!/bin/bash
+
+# NEVER USE IN PRODUCTION
+
+# Script to temporarely forward traffic from one interface to another. For different device. (Device must be in same subnet and have a default route to the intern ip.
+
+while [ ! $# -eq 0 ]
+do
+  case "$1" in
+      --iif | -i)
+      var_if_intern=$2;;
+      --eif | -e)
+      var_if_extern=$2;;
+      --addr | -a)
+      var_ip_if_intern=$2;;
+  esac
+  shift
+  shift
+done
+
+
+# Add IP to internal interface
+sudo ip addr add "$var_ip_if_intern"/24 dev "$var_if_intern"
+
+# Allow forwarding for the needed interfaces
+#sysctl -a | grep forward
+sudo sysctl net.ipv4.ip_forward=1
+sudo sysctl net.ipv4.conf."$var_if_intern".forwarding=1
+sudo sysctl net.ipv4.conf."$var_if_extern".forwarding=1
+
+# Define necessarely ruleset (too generic, should be fixed for production use.)
+sudo nft flush ruleset
+sudo nft add table inet filter
+sudo nft add chain inet filter forward '{type filter hook forward priority 0; policy accept;}'
+sudo nft add chain inet filter input '{type filter hook input priority 0; policy accept;}'
+sudo nft add chain inet filter output '{type filter hook output priority 0; policy accept;}'
+
+sudo nft add table nat
+sudo nft add chain nat postrouting '{type nat hook postrouting priority 100; policy accept;}'
+sudo nft add rule nat postrouting oifname "$var_if_extern" masquerade
+sudo nft add chain nat prerouting '{type nat hook prerouting priority -100; policy accept;}'
+
+sudo systemctl stop iptables
+sudo systemctl stop firewalld
+sudo systemctl start nftables
+
+
